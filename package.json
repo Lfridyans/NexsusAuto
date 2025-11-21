@@ -1,0 +1,41 @@
+{
+  "name": "nexus-swarm",
+  "version": "1.0.0",
+  "description": "NEXUS // SWARM - Autonomous Neural Trading Execution Layer with AI-powered cryptocurrency trading bots",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "lucide-react": "^0.554.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  },
+  "keywords": [
+    "cryptocurrency",
+    "trading",
+    "ai",
+    "trading-bots",
+    "crypto",
+    "binance",
+    "react",
+    "typescript",
+    "vite",
+    "quantitative-trading"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lfridyans/NexsusAuto.git"
+  },
+  "homepage": "https://lfridyans.github.io/NexsusAuto"
+}
