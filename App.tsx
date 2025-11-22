@@ -416,21 +416,59 @@ export default function App() {
 
   // --- REAL-TIME MARKET DATA FETCHING ---
   const fetchMarketPrices = async () => {
-    // Using CORS proxy for public Binance API
-    const corsProxy = 'https://api.allorigins.win/raw?url=';
-    const binanceTicker = 'https://api.binance.com/api/v3/ticker/price';
-    const binanceEndpoints = [
-      `${corsProxy}${encodeURIComponent(binanceTicker)}`,
-      'https://api.binance.com/api/v3/ticker/price',
-      'https://api1.binance.com/api/v3/ticker/price'
+    // Multiple CORS proxy options for reliability
+    const corsProxies = [
+      'https://api.allorigins.win/raw?url=',
+      'https://cors-anywhere.herokuapp.com/',
+      'https://api.codetabs.com/v1/proxy?quest='
     ];
+    const binanceTicker = 'https://api.binance.com/api/v3/ticker/price';
+    const binanceEndpoints: string[] = [];
+    
+    // Build endpoints with multiple proxy options
+    corsProxies.forEach(proxy => {
+      binanceEndpoints.push(`${proxy}${encodeURIComponent(binanceTicker)}`);
+    });
+    
+    // Add direct endpoints as fallback
+    binanceEndpoints.push(
+      'https://api.binance.com/api/v3/ticker/price',
+      'https://api1.binance.com/api/v3/ticker/price',
+      'https://api2.binance.com/api/v3/ticker/price',
+      'https://api3.binance.com/api/v3/ticker/price'
+    );
 
+    // Try each endpoint with timeout
     for (const endpoint of binanceEndpoints) {
       try {
-        const response = await fetch(endpoint, { method: 'GET' });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
+        const response = await fetch(endpoint, { 
+          method: 'GET',
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        
         if (!response.ok) continue;
         
-        const data = await response.json();
+        let data;
+        try {
+          data = await response.json();
+        } catch (e) {
+          // If response is not JSON, might be wrapped by proxy
+          const text = await response.text();
+          try {
+            data = JSON.parse(text);
+          } catch (e2) {
+            continue;
+          }
+        }
+        
         const newPrices: Record<string, number> = {};
         const newTrends: Record<string, 'UP' | 'DOWN'> = {};
 
@@ -438,41 +476,74 @@ export default function App() {
           data.forEach((item: { symbol: string; price: string }) => {
             const symbol = item.symbol;
             const price = parseFloat(item.price);
-            newPrices[symbol] = price;
+            if (!isNaN(price) && price > 0) {
+              newPrices[symbol] = price;
 
-            if (prevPricesRef.current[symbol]) {
-              newTrends[symbol] = price > prevPricesRef.current[symbol] ? 'UP' : 'DOWN';
+              if (prevPricesRef.current[symbol]) {
+                newTrends[symbol] = price > prevPricesRef.current[symbol] ? 'UP' : 'DOWN';
+              }
             }
           });
 
-          prevPricesRef.current = newPrices;
-          setMarketPrices(newPrices);
-          setMarketTrend(newTrends);
-          setIsOnline(true);
-          return; 
+          if (Object.keys(newPrices).length > 0) {
+            prevPricesRef.current = newPrices;
+            setMarketPrices(newPrices);
+            setMarketTrend(newTrends);
+            setIsOnline(true);
+            return; 
+          }
         }
-      } catch (error) { continue; }
+      } catch (error) { 
+        // Skip to next endpoint
+        continue; 
+      }
     }
     
+    // Fallback: Try CoinGecko API (no CORS issues, free tier)
     try {
-      const response = await fetch('https://api.coincap.io/v2/assets?limit=100');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      // Get top 100 cryptocurrencies from CoinGecko
+      const response = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false', {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (response.ok) {
         const json = await response.json();
         const newPrices: Record<string, number> = {};
         const newTrends: Record<string, 'UP' | 'DOWN'> = {};
 
-        json.data.forEach((asset: any) => {
-           const symbol = `${asset.symbol.toUpperCase()}USDT`;
-           const price = parseFloat(asset.priceUsd);
-           newPrices[symbol] = price;
-           if (prevPricesRef.current[symbol]) newTrends[symbol] = price > prevPricesRef.current[symbol] ? 'UP' : 'DOWN';
+        json.forEach((asset: any) => {
+          const symbol = `${asset.symbol.toUpperCase()}USDT`;
+          const price = parseFloat(asset.current_price);
+          if (!isNaN(price) && price > 0) {
+            newPrices[symbol] = price;
+            if (prevPricesRef.current[symbol]) {
+              newTrends[symbol] = price > prevPricesRef.current[symbol] ? 'UP' : 'DOWN';
+            }
+          }
         });
-        prevPricesRef.current = newPrices;
-        setMarketPrices(newPrices);
-        setMarketTrend(newTrends);
-        setIsOnline(true);
+        
+        if (Object.keys(newPrices).length > 0) {
+          prevPricesRef.current = newPrices;
+          setMarketPrices(newPrices);
+          setMarketTrend(newTrends);
+          setIsOnline(true);
+          return;
+        }
       }
-    } catch (e) { console.warn("Fallback failed"); setIsOnline(false); }
+    } catch (e) { 
+      console.warn("All API endpoints failed"); 
+    }
+    
+    setIsOnline(false);
   };
 
   useEffect(() => {
@@ -566,24 +637,66 @@ export default function App() {
 
       try {
         // INCREASED LIMIT TO 200 to support EMA 200 calculation
-        // Using CORS proxy to bypass CORS restrictions
-        const corsProxy = 'https://api.allorigins.win/raw?url=';
-        const binanceBase = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`;
-        const endpoints = [
-            `${corsProxy}${encodeURIComponent(binanceBase)}`,
-            `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
-            `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`
+        // Multiple CORS proxy options for reliability
+        const corsProxies = [
+          'https://api.allorigins.win/raw?url=',
+          'https://api.codetabs.com/v1/proxy?quest='
         ];
+        const binanceBase = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`;
+        const endpoints: string[] = [];
+        
+        // Build endpoints with proxy options
+        corsProxies.forEach(proxy => {
+          endpoints.push(`${proxy}${encodeURIComponent(binanceBase)}`);
+        });
+        
+        // Add direct endpoints as fallback
+        endpoints.push(
+          `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
+          `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
+          `https://api2.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
+          `https://api3.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`
+        );
 
         let data = null;
         for (const endpoint of endpoints) {
             try {
-                const res = await fetch(endpoint);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout for klines
+                
+                const res = await fetch(endpoint, {
+                  method: 'GET',
+                  signal: controller.signal,
+                  headers: {
+                    'Accept': 'application/json'
+                  }
+                });
+                
+                clearTimeout(timeoutId);
+                
                 if (res.ok) {
-                    data = await res.json();
-                    break; 
+                    let jsonData;
+                    try {
+                      jsonData = await res.json();
+                    } catch (e) {
+                      // If response is not JSON, might be wrapped by proxy
+                      const text = await res.text();
+                      try {
+                        jsonData = JSON.parse(text);
+                      } catch (e2) {
+                        continue;
+                      }
+                    }
+                    
+                    if (Array.isArray(jsonData) && jsonData.length > 0) {
+                      data = jsonData;
+                      break; 
+                    }
                 }
-            } catch (e) { }
+            } catch (e) { 
+              // Timeout or network error, try next endpoint
+              continue; 
+            }
         }
 
         if (!data) continue; 
