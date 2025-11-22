@@ -984,40 +984,56 @@ export default function App() {
               const accountRiskPercent = 0.02; // 2% risk per trade
               const accountRiskAmount = b.balance * accountRiskPercent;
               
-              // RISK PROFILE CALCULATIONS (OPTIMIZED)
+              // RISK PROFILE CALCULATIONS (OPTIMIZED & FIXED)
               let riskMultiplier = 1.5; // Base Stop Distance in ATR
               let rewardRatio = 2.0;    // Base Reward to Risk Ratio
               
-              // Calculate stop distance first (will be used to size position)
-              const stopDistance = atr * riskMultiplier;
-              
-              // Agent-specific risk parameters (OPTIMIZED)
+              // Agent-specific risk parameters (OPTIMIZED for each timeframe)
               if (b.name === "Chloe") {
-                  riskMultiplier = 2.5;  // Wider stop for weekly (candles move 10-20%)
-                  rewardRatio = 3.0;     // Hunting 1:3 Risk/Reward (Home Runs)
+                  // Weekly timeframe: Candles can move 10-20%, need wider stops
+                  // Professional R:R for weekly swing trading: 1:3 minimum
+                  riskMultiplier = 2.5;  // Wider stop for weekly (2.5x ATR = ~5-10% stop)
+                  rewardRatio = 3.5;     // Professional 1:3.5 Risk/Reward for weekly (Home Runs)
               } else if (b.name === "Sebastian") {
-                  riskMultiplier = 1.5;  // Tighter stop for Daily with retest confirmation
+                  riskMultiplier = 1.5;  // Daily timeframe: Tighter stop with retest confirmation
                   rewardRatio = 2.5;     // Improved 1:2.5
               } else if (b.name === "Dr. Adrian") {
-                  riskMultiplier = 1.5;  // Wider stop for 4H (was too tight at 1.0)
-                  rewardRatio = 2.0;     // Improved 1:2 (was 1:1.5)
+                  riskMultiplier = 1.5;  // 4H timeframe: Wider stop for 4H
+                  rewardRatio = 2.0;     // Improved 1:2
               } else if (b.name === "Goldy Roger") {
-                  riskMultiplier = 0.8;  // Tight stop for 5-15m scalping (quick exits)
-                  rewardRatio = 1.5;     // Quick 1:1.5 for scalping (fast profits)
+                  riskMultiplier = 0.8;  // 5-15m scalping: Tight stop for quick exits
+                  rewardRatio = 1.5;     // Quick 1:1.5 for scalping
               }
               
-              // Recalculate stop distance with agent-specific multiplier
+              // Calculate stop distance with agent-specific multiplier
               const finalStopDistance = atr * riskMultiplier;
               const targetDistance = finalStopDistance * rewardRatio;
               
-              // Calculate position size based on risk amount and stop distance
-              // Position size = Risk Amount / (Stop Distance * Leverage)
-              let tradeMargin = 0;
-              if (decision === 'BUY') {
-                  tradeMargin = accountRiskAmount / (finalStopDistance / currentPrice) / leverage;
-              } else {
-                  tradeMargin = accountRiskAmount / (finalStopDistance / currentPrice) / leverage;
+              // For weekly timeframe (Chloe), ensure stops are proportional to price
+              // Weekly ATR can be very large, so we cap it to reasonable % of price
+              let adjustedStopDistance = finalStopDistance;
+              let adjustedTargetDistance = targetDistance;
+              
+              if (b.name === "Chloe") {
+                  // For weekly: Stop should be max 8% of price (weekly can move 10-20%)
+                  const maxStopPercent = 0.08; // 8% max stop for weekly
+                  const stopPercent = finalStopDistance / currentPrice;
+                  
+                  if (stopPercent > maxStopPercent) {
+                      // Cap stop to 8% of price, then adjust target proportionally
+                      adjustedStopDistance = currentPrice * maxStopPercent;
+                      adjustedTargetDistance = adjustedStopDistance * rewardRatio;
+                  } else if (stopPercent < 0.03) {
+                      // Minimum 3% stop for weekly (weekly moves are large)
+                      adjustedStopDistance = currentPrice * 0.03;
+                      adjustedTargetDistance = adjustedStopDistance * rewardRatio;
+                  }
               }
+              
+              // Calculate position size based on risk amount and stop distance
+              // Position size = Risk Amount / (Stop Distance % * Leverage)
+              const stopPercent = adjustedStopDistance / currentPrice;
+              let tradeMargin = accountRiskAmount / stopPercent / leverage;
               
               // Cap position size (max 30% of balance per trade, min 5%)
               const maxPositionSize = b.balance * 0.30;
@@ -1031,14 +1047,121 @@ export default function App() {
               // Round down to 1 decimal
               tradeMargin = Math.floor(tradeMargin * 10) / 10;
 
-              // Determine Price Levels (using already calculated distances)
+              // Determine Price Levels - CRITICAL FIX: Ensure correct direction for BUY and SELL
               let tpPrice = 0, slPrice = 0;
               if (decision === 'BUY') {
-                  tpPrice = currentPrice + targetDistance;
-                  slPrice = currentPrice - finalStopDistance;
-              } else {
-                  tpPrice = currentPrice - targetDistance;
-                  slPrice = currentPrice + finalStopDistance;
+                  // BUY: TP above entry, SL below entry ✅
+                  tpPrice = currentPrice + adjustedTargetDistance;
+                  slPrice = currentPrice - adjustedStopDistance;
+              } else if (decision === 'SELL') {
+                  // SELL: TP BELOW entry, SL ABOVE entry ✅ (FIXED!)
+                  tpPrice = currentPrice - adjustedTargetDistance;
+                  slPrice = currentPrice + adjustedStopDistance;
+              }
+              
+              // VALIDATION & ADJUSTMENT: Ensure TP and SL are reasonable (not too far, not too close)
+              // Define min/max TP distance based on timeframe and volatility
+              let minTPPercent = 0.02; // Minimum 2% for TP
+              let maxTPPercent = 0.15; // Maximum 15% for TP
+              
+              // Adjust min/max based on agent timeframe
+              if (b.name === "Chloe") {
+                  // Weekly timeframe: Can move 10-20%, so TP can be further
+                  minTPPercent = 0.05;  // Minimum 5% for weekly
+                  maxTPPercent = 0.25;  // Maximum 25% for weekly (home runs)
+              } else if (b.name === "Sebastian") {
+                  // Daily timeframe: Moderate moves 5-10%
+                  minTPPercent = 0.03;  // Minimum 3% for daily
+                  maxTPPercent = 0.15;  // Maximum 15% for daily
+              } else if (b.name === "Dr. Adrian") {
+                  // 4H timeframe: Moderate moves 3-8%
+                  minTPPercent = 0.02;  // Minimum 2% for 4H
+                  maxTPPercent = 0.12;  // Maximum 12% for 4H
+              } else if (b.name === "Goldy Roger") {
+                  // 5-15m scalping: Quick moves 0.5-2%
+                  minTPPercent = 0.005; // Minimum 0.5% for scalping
+                  maxTPPercent = 0.05;  // Maximum 5% for scalping
+              }
+              
+              // Adjust TP if too far or too close
+              if (decision === 'BUY') {
+                  const tpPercent = (tpPrice - currentPrice) / currentPrice;
+                  
+                  if (tpPrice <= currentPrice) {
+                      // TP must be above entry
+                      tpPrice = currentPrice * (1 + minTPPercent);
+                  } else if (tpPercent < minTPPercent) {
+                      // TP too close, adjust to minimum
+                      tpPrice = currentPrice * (1 + minTPPercent);
+                  } else if (tpPercent > maxTPPercent) {
+                      // TP too far, cap to maximum
+                      tpPrice = currentPrice * (1 + maxTPPercent);
+                  }
+                  
+                  // Validate SL
+                  if (slPrice >= currentPrice) {
+                      // SL must be below entry
+                      slPrice = currentPrice * (1 - minTPPercent);
+                  }
+                  
+                  // Ensure R:R ratio is maintained after TP adjustment
+                  const actualTPDistance = tpPrice - currentPrice;
+                  const actualSLDistance = currentPrice - slPrice;
+                  if (actualSLDistance > 0) {
+                      const actualRR = actualTPDistance / actualSLDistance;
+                      if (actualRR < 1.0) {
+                          // R:R too low, adjust TP to maintain minimum 1:1
+                          tpPrice = currentPrice + (actualSLDistance * 1.0);
+                      }
+                  }
+                  
+              } else if (decision === 'SELL') {
+                  const tpPercent = (currentPrice - tpPrice) / currentPrice;
+                  
+                  if (tpPrice >= currentPrice) {
+                      // TP must be below entry for SELL
+                      tpPrice = currentPrice * (1 - minTPPercent);
+                  } else if (tpPercent < minTPPercent) {
+                      // TP too close, adjust to minimum
+                      tpPrice = currentPrice * (1 - minTPPercent);
+                  } else if (tpPercent > maxTPPercent) {
+                      // TP too far, cap to maximum
+                      tpPrice = currentPrice * (1 - maxTPPercent);
+                  }
+                  
+                  // Validate SL
+                  if (slPrice <= currentPrice) {
+                      // SL must be above entry for SELL
+                      slPrice = currentPrice * (1 + minTPPercent);
+                  }
+                  
+                  // Ensure R:R ratio is maintained after TP adjustment
+                  const actualTPDistance = currentPrice - tpPrice;
+                  const actualSLDistance = slPrice - currentPrice;
+                  if (actualSLDistance > 0) {
+                      const actualRR = actualTPDistance / actualSLDistance;
+                      if (actualRR < 1.0) {
+                          // R:R too low, adjust TP to maintain minimum 1:1
+                          tpPrice = currentPrice - (actualSLDistance * 1.0);
+                      }
+                  }
+              }
+              
+              // Final validation: Double-check TP and SL are in correct direction
+              if (decision === 'BUY') {
+                  if (tpPrice <= currentPrice || slPrice >= currentPrice) {
+                      console.error(`BUY TP/SL ERROR: TP=${tpPrice}, Entry=${currentPrice}, SL=${slPrice}`);
+                      // Emergency fallback
+                      tpPrice = currentPrice * 1.05;
+                      slPrice = currentPrice * 0.95;
+                  }
+              } else if (decision === 'SELL') {
+                  if (tpPrice >= currentPrice || slPrice <= currentPrice) {
+                      console.error(`SELL TP/SL ERROR: TP=${tpPrice}, Entry=${currentPrice}, SL=${slPrice}`);
+                      // Emergency fallback
+                      tpPrice = currentPrice * 0.95;
+                      slPrice = currentPrice * 1.05;
+                  }
               }
 
               // SAFETY: Ensure SL doesn't exceed liquidation approximation (approx 80% move / lev)
