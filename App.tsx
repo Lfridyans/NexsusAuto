@@ -416,21 +416,15 @@ export default function App() {
 
   // --- REAL-TIME MARKET DATA FETCHING ---
   const fetchMarketPrices = async () => {
-    // Multiple CORS proxy options for reliability
-    const corsProxies = [
-      'https://api.allorigins.win/raw?url=',
-      'https://cors-anywhere.herokuapp.com/',
-      'https://api.codetabs.com/v1/proxy?quest='
-    ];
+    // Use working CORS proxy (allorigins.win is most reliable)
+    const corsProxy = 'https://api.allorigins.win/raw?url=';
     const binanceTicker = 'https://api.binance.com/api/v3/ticker/price';
     const binanceEndpoints: string[] = [];
     
-    // Build endpoints with multiple proxy options
-    corsProxies.forEach(proxy => {
-      binanceEndpoints.push(`${proxy}${encodeURIComponent(binanceTicker)}`);
-    });
+    // Primary: CORS proxy (most reliable for GitHub Pages)
+    binanceEndpoints.push(`${corsProxy}${encodeURIComponent(binanceTicker)}`);
     
-    // Add direct endpoints as fallback
+    // Fallback: Direct endpoints (might work in some browsers/networks)
     binanceEndpoints.push(
       'https://api.binance.com/api/v3/ticker/price',
       'https://api1.binance.com/api/v3/ticker/price',
@@ -637,20 +631,15 @@ export default function App() {
 
       try {
         // INCREASED LIMIT TO 200 to support EMA 200 calculation
-        // Multiple CORS proxy options for reliability
-        const corsProxies = [
-          'https://api.allorigins.win/raw?url=',
-          'https://api.codetabs.com/v1/proxy?quest='
-        ];
+        // Use working CORS proxy for klines data
+        const corsProxy = 'https://api.allorigins.win/raw?url=';
         const binanceBase = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`;
         const endpoints: string[] = [];
         
-        // Build endpoints with proxy options
-        corsProxies.forEach(proxy => {
-          endpoints.push(`${proxy}${encodeURIComponent(binanceBase)}`);
-        });
+        // Primary: CORS proxy (most reliable)
+        endpoints.push(`${corsProxy}${encodeURIComponent(binanceBase)}`);
         
-        // Add direct endpoints as fallback
+        // Fallback: Direct endpoints
         endpoints.push(
           `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
           `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
