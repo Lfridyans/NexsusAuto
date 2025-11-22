@@ -244,7 +244,7 @@ export const BOT_CONFIGS: BotConfig[] = [
     technique: "I correlate crypto asset price action with global liquidity flows. I use On-Balance Volume (OBV) and 20x Leverage to capture mid-term trends in the broad market, compounding gains on volatility.",
     desc: "The futurist. Analyzes market-wide liquidity and correlations.",
     preferredTimeframe: "240", // 4 Hours
-    leverage: 20
+    leverage: 10  // Reduced from 20x for better risk management
   },
   {
     name: "Goldy Roger",
@@ -256,6 +256,6 @@ export const BOT_CONFIGS: BotConfig[] = [
     technique: "DAILY GOLD SCALPING. I trade XAUUSD (PAXG) using 20x leverage, targeting institutional liquidity sweeps at key psychological levels (Daily Support/Resistance).",
     desc: "The Gold Standard. Specialized in XAUUSD/PAXG Daily Trends.",
     preferredTimeframe: "D",
-    leverage: 20
+    leverage: 10  // Reduced from 20x for better risk management
   }
 ];

@@ -122,6 +122,197 @@ const calculateATR = (highs: number[], lows: number[], closes: number[], period:
 // Helper to detect candle color
 const isGreenCandle = (open: number, close: number) => close > open;
 
+// --- NEW TECHNICAL ANALYSIS HELPERS ---
+
+// On-Balance Volume (OBV)
+const calculateOBV = (closes: number[], volumes: number[]) => {
+  if (closes.length !== volumes.length || closes.length < 2) return [];
+  
+  let obv = 0;
+  const obvValues: number[] = [obv];
+  
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i] > closes[i - 1]) {
+      obv += volumes[i]; // Price up, add volume
+    } else if (closes[i] < closes[i - 1]) {
+      obv -= volumes[i]; // Price down, subtract volume
+    }
+    // If price unchanged, OBV unchanged
+    obvValues.push(obv);
+  }
+  
+  return obvValues;
+};
+
+// Calculate Fibonacci Retracement Levels
+const calculateFibonacciLevels = (swingHigh: number, swingLow: number) => {
+  const diff = swingHigh - swingLow;
+  return {
+    0.236: swingLow + diff * 0.236,
+    0.382: swingLow + diff * 0.382,
+    0.5: swingLow + diff * 0.5,
+    0.618: swingLow + diff * 0.618,
+    0.786: swingLow + diff * 0.786,
+  };
+};
+
+// Calculate Fibonacci Extension Levels
+const calculateFibonacciExtensions = (swingHigh: number, swingLow: number, retracement: number) => {
+  const diff = swingHigh - swingLow;
+  const fibDiff = swingHigh - retracement;
+  return {
+    1.272: swingHigh + fibDiff * 0.272,
+    1.618: swingHigh + diff * 0.618,
+    2.0: swingHigh + diff,
+    2.618: swingHigh + diff * 1.618,
+  };
+};
+
+// Detect Swing Highs and Lows
+const detectSwingPoints = (highs: number[], lows: number[], period: number = 5) => {
+  const swingHighs: Array<{index: number; price: number}> = [];
+  const swingLows: Array<{index: number; price: number}> = [];
+  
+  for (let i = period; i < highs.length - period; i++) {
+    // Check for swing high
+    let isSwingHigh = true;
+    for (let j = i - period; j <= i + period; j++) {
+      if (j !== i && highs[j] >= highs[i]) {
+        isSwingHigh = false;
+        break;
+      }
+    }
+    if (isSwingHigh) {
+      swingHighs.push({ index: i, price: highs[i] });
+    }
+    
+    // Check for swing low
+    let isSwingLow = true;
+    for (let j = i - period; j <= i + period; j++) {
+      if (j !== i && lows[j] <= lows[i]) {
+        isSwingLow = false;
+        break;
+      }
+    }
+    if (isSwingLow) {
+      swingLows.push({ index: i, price: lows[i] });
+    }
+  }
+  
+  return { swingHighs, swingLows };
+};
+
+// Find Supply/Demand Zones
+const findSupplyDemandZones = (
+  highs: number[], 
+  lows: number[], 
+  closes: number[], 
+  volumes: number[],
+  lookback: number = 20
+) => {
+  const supplyZones: Array<{high: number; low: number; strength: number}> = [];
+  const demandZones: Array<{high: number; low: number; strength: number}> = [];
+  
+  for (let i = 5; i < closes.length - 5; i++) {
+    // Supply Zone: Area where price was rejected downward (bearish candles after high)
+    if (highs[i] === Math.max(...highs.slice(Math.max(0, i-lookback), i+5))) {
+      const zoneHigh = highs[i];
+      const zoneLow = Math.min(...lows.slice(i, Math.min(closes.length, i+5)));
+      const bearishCount = closes.slice(i, Math.min(closes.length, i+5))
+        .filter((c, idx) => c < closes[i] || closes[i + idx] < opens[i + idx]).length;
+      
+      if (bearishCount > 2) {
+        supplyZones.push({
+          high: zoneHigh,
+          low: zoneLow,
+          strength: bearishCount
+        });
+      }
+    }
+    
+    // Demand Zone: Area where price was rejected upward (bullish candles after low)
+    if (lows[i] === Math.min(...lows.slice(Math.max(0, i-lookback), i+5))) {
+      const zoneLow = lows[i];
+      const zoneHigh = Math.max(...highs.slice(i, Math.min(closes.length, i+5)));
+      const bullishCount = closes.slice(i, Math.min(closes.length, i+5))
+        .filter((c, idx) => c > closes[i] || closes[i + idx] > opens[i + idx]).length;
+      
+      if (bullishCount > 2) {
+        demandZones.push({
+          high: zoneHigh,
+          low: zoneLow,
+          strength: bullishCount
+        });
+      }
+    }
+  }
+  
+  return { supplyZones, demandZones };
+};
+
+// Detect Candle Patterns
+const detectCandlePatterns = (opens: number[], highs: number[], lows: number[], closes: number[]) => {
+  if (opens.length < 2) return { patterns: [], isBullishEngulfing: false, isBearishEngulfing: false, isPinBar: false };
+  
+  const i = opens.length - 1;
+  const prevI = i - 1;
+  
+  const currentBody = Math.abs(closes[i] - opens[i]);
+  const prevBody = Math.abs(closes[prevI] - opens[prevI]);
+  const upperWick = highs[i] - Math.max(closes[i], opens[i]);
+  const lowerWick = Math.min(closes[i], opens[i]) - lows[i];
+  
+  // Bullish Engulfing
+  const isBullishEngulfing = 
+    closes[prevI] < opens[prevI] && // Previous red
+    closes[i] > opens[i] && // Current green
+    opens[i] < closes[prevI] && // Current open below prev close
+    closes[i] > opens[prevI]; // Current close above prev open
+  
+  // Bearish Engulfing
+  const isBearishEngulfing =
+    closes[prevI] > opens[prevI] && // Previous green
+    closes[i] < opens[i] && // Current red
+    opens[i] > closes[prevI] && // Current open above prev close
+    closes[i] < opens[prevI]; // Current close below prev open
+  
+  // Pin Bar (rejection wick > 2x body)
+  const isPinBar = (upperWick > currentBody * 2) || (lowerWick > currentBody * 2);
+  const isBullishPinBar = lowerWick > currentBody * 2 && closes[i] > opens[i];
+  const isBearishPinBar = upperWick > currentBody * 2 && closes[i] < opens[i];
+  
+  return {
+    isBullishEngulfing,
+    isBearishEngulfing,
+    isPinBar,
+    isBullishPinBar,
+    isBearishPinBar,
+    upperWick,
+    lowerWick,
+    currentBody
+  };
+};
+
+// Calculate Volume Profile (simplified)
+const calculateVolumeProfile = (highs: number[], lows: number[], closes: number[], volumes: number[]) => {
+  const typicalPrices = closes.map((close, i) => (highs[i] + lows[i] + close) / 3);
+  const vwap = typicalPrices.reduce((sum, tp, i) => sum + tp * volumes[i], 0) / 
+               volumes.reduce((sum, vol) => sum + vol, 0);
+  return vwap;
+};
+
+// Check if price is near psychological level (round numbers)
+const findNearestPsychologicalLevel = (price: number, decimals: number = 2): number | null => {
+  const power = Math.pow(10, decimals);
+  const rounded = Math.round(price / power) * power;
+  const distance = Math.abs(price - rounded) / price;
+  
+  if (distance < 0.01) { // Within 1%
+    return rounded;
+  }
+  return null;
+};
+
 export default function App() {
   // --- STATE MANAGEMENT ---
   const [bots, setBots] = useState<Bot[]>(() => {
@@ -394,11 +585,18 @@ export default function App() {
         const highs = data.map((d: any) => parseFloat(d[2]));
         const lows = data.map((d: any) => parseFloat(d[3]));
         const closes = data.map((d: any) => parseFloat(d[4]));
+        const volumes = data.map((d: any) => parseFloat(d[5])); // Volume data
         
         const currentPrice = closes[closes.length - 1];
         const openPrice = opens[opens.length - 1];
         const lastHigh = highs[highs.length - 1];
         const lastLow = lows[lows.length - 1];
+        
+        // Volume Analysis
+        const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, volumes.length);
+        const currentVolume = volumes[volumes.length - 1];
+        const volumeAboveAverage = currentVolume > avgVolume * 1.2; // 20% above average
+        const volumeRatio = currentVolume / avgVolume;
 
         // Basic Indicators
         const rsi = calculateRSI(closes, 14);
@@ -419,128 +617,310 @@ export default function App() {
 
         // --- AGENT SPECIFIC LOGIC ---
         if (bot.name === "Chloe") {
-          // CHLOE: WEEKLY SWING (Macro Structure)
+          // CHLOE: WEEKLY SWING (Fibonacci Macro Expansion) - FIXED
           
-          const trendBullish = ema9 > ema21;
-          const structureBreakHigh = lastHigh > highs[highs.length-2]; // Higher High
-
-          if (trendBullish && rsi > 50 && currentPrice > ema21) {
-              if (isGreenCandle(openPrice, currentPrice) || structureBreakHigh) {
-                  decision = 'BUY';
-                  confidenceScore = 88;
-                  reason = `WEEKLY CHART: Price $${currentPrice} > EMA 21 ($${ema21.toFixed(4)}). EMA 9/21 Golden Cross active. RSI ${rsi.toFixed(0)} Bullish.`;
+          // Detect swing points for Fibonacci
+          const { swingHighs, swingLows } = detectSwingPoints(highs, lows, 5);
+          const lastSwingHigh = swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].price : Math.max(...highs.slice(-50));
+          const lastSwingLow = swingLows.length > 0 ? swingLows[swingLows.length - 1].price : Math.min(...lows.slice(-50));
+          const swingRange = lastSwingHigh - lastSwingLow;
+          
+          // Calculate Fibonacci retracement levels
+          const fibLevels = calculateFibonacciLevels(lastSwingHigh, lastSwingLow);
+          const fibExtensions = calculateFibonacciExtensions(lastSwingHigh, lastSwingLow, currentPrice);
+          
+          // Improved EMA for weekly (use 10/30 for weekly instead of 9/21)
+          const ema10 = calculateEMA(closes, 10);
+          const ema30 = calculateEMA(closes, 30);
+          const trendBullish = ema10 > ema30 && currentPrice > ema30;
+          const trendBearish = ema10 < ema30 && currentPrice < ema30;
+          
+          // Market Structure Break (more robust)
+          const structureBreakHigh = swingHighs.length >= 2 ? 
+            currentPrice > swingHighs[swingHighs.length - 2].price : 
+            currentPrice > highs[highs.length - 10];
+          const structureBreakLow = swingLows.length >= 2 ? 
+            currentPrice < swingLows[swingLows.length - 2].price : 
+            currentPrice < lows[lows.length - 10];
+          
+          // Volume confirmation
+          const volumeConfirmation = volumeAboveAverage && volumeRatio > 1.5;
+          
+          // Candle pattern detection
+          const patterns = detectCandlePatterns(opens, highs, lows, closes);
+          
+          // Check if price is at Fibonacci retracement level (within 2%)
+          const isAtFib618 = Math.abs(currentPrice - fibLevels[0.618]) / currentPrice < 0.02;
+          const isAtFib382 = Math.abs(currentPrice - fibLevels[0.382]) / currentPrice < 0.02;
+          const isAtFib786 = Math.abs(currentPrice - fibLevels[0.786]) / currentPrice < 0.02;
+          const isAboveFib618 = currentPrice > fibLevels[0.618] && currentPrice < fibLevels[0.786];
+          
+          // BUY Signal: Fibonacci bounce + trend bullish + volume + structure break
+          if (trendBullish && rsi > 45 && rsi < 65 && currentPrice > ema30) {
+              if ((isAtFib382 || isAtFib618 || isAboveFib618) && (structureBreakHigh || volumeConfirmation)) {
+                  if (patterns.isBullishEngulfing || patterns.isBullishPinBar || isGreenCandle(openPrice, currentPrice)) {
+                      decision = 'BUY';
+                      confidenceScore = 90 + (volumeConfirmation ? 5 : 0);
+                      reason = `WEEKLY FIB BOUNCE: Price $${currentPrice} at Fib ${isAtFib382 ? '38.2%' : isAtFib618 ? '61.8%' : '61.8-78.6%'} ($${isAtFib382 ? fibLevels[0.382].toFixed(4) : fibLevels[0.618].toFixed(4)}). EMA 10/30 bullish. ${volumeConfirmation ? 'HIGH VOLUME confirmation' : 'Volume normal'}. ${patterns.isBullishEngulfing ? 'Bullish Engulfing' : patterns.isBullishPinBar ? 'Bullish Pin Bar' : 'Green candle'}. Target: Fib Ext 1.618 @ $${fibExtensions[1.618].toFixed(4)}.`;
+                  } else {
+                      decision = 'HOLD';
+                      confidenceScore = 65;
+                      reason = `WEEKLY FIB: At Fib level but waiting for bullish candle confirmation.`;
+                  }
               } else {
-                   decision = 'HOLD';
-                   confidenceScore = 60;
-                   reason = `WEEKLY: Uptrend detected but current candle is red. Waiting for green closure to confirm continuation.`;
+                  decision = 'HOLD';
+                  confidenceScore = 55;
+                  reason = `WEEKLY: Uptrend but price not at Fibonacci level. Current: $${currentPrice.toFixed(4)}, Fib 61.8%: $${fibLevels[0.618].toFixed(4)}.`;
               }
           } 
-          else if (!trendBullish && rsi < 50 && currentPrice < ema21) {
-              if (!isGreenCandle(openPrice, currentPrice)) {
+          // SELL Signal: Fibonacci rejection + trend bearish + volume + structure break
+          else if (trendBearish && rsi < 55 && rsi > 35 && currentPrice < ema30) {
+              if (structureBreakLow && (patterns.isBearishEngulfing || patterns.isBearishPinBar || !isGreenCandle(openPrice, currentPrice))) {
                   decision = 'SELL';
-                  confidenceScore = 88;
-                  reason = `WEEKLY CHART: Bearish Structure. Price $${currentPrice} rejected at EMA 21 ($${ema21.toFixed(4)}). RSI ${rsi.toFixed(0)} falling.`;
+                  confidenceScore = 90 + (volumeConfirmation ? 5 : 0);
+                  reason = `WEEKLY FIB REJECTION: Price $${currentPrice} rejected at Fib level. EMA 10/30 bearish. ${volumeConfirmation ? 'HIGH VOLUME breakdown' : 'Volume normal'}. ${patterns.isBearishEngulfing ? 'Bearish Engulfing' : patterns.isBearishPinBar ? 'Bearish Pin Bar' : 'Red candle'}. Structure break detected.`;
               } else {
-                   decision = 'HOLD';
-                   confidenceScore = 60;
-                   reason = `WEEKLY: Downtrend active but current candle green (pullback). Waiting for rejection.`;
+                  decision = 'HOLD';
+                  confidenceScore = 55;
+                  reason = `WEEKLY: Downtrend but waiting for structure break confirmation.`;
               }
           } else {
-               let rsiDesc = "";
-               if (rsi >= 70) rsiDesc = ` RSI ${rsi.toFixed(0)} Overbought (>70, Reversion Risk).`;
-               else if (rsi <= 30) rsiDesc = ` RSI ${rsi.toFixed(0)} Oversold (<30, Bounce Risk).`;
-               reason = `WEEKLY CONSOLIDATION: EMA 9/21 flat. Price ranging between $${lastLow} and $${lastHigh}.${rsiDesc} No clean break.`;
+              let rsiDesc = "";
+              if (rsi >= 70) rsiDesc = ` RSI ${rsi.toFixed(0)} Overbought (>70, Reversion Risk).`;
+              else if (rsi <= 30) rsiDesc = ` RSI ${rsi.toFixed(0)} Oversold (<30, Bounce Risk).`;
+              reason = `WEEKLY CONSOLIDATION: EMA 10/30 flat. Price ranging between Fib 38.2% ($${fibLevels[0.382].toFixed(4)}) and Fib 78.6% ($${fibLevels[0.786].toFixed(4)}).${rsiDesc} No clean break.`;
           }
 
         } else if (bot.name === "Sebastian") {
-          // SEBASTIAN: DAILY MACRO (Golden Cross / Death Cross)
+          // SEBASTIAN: DAILY MACRO (Golden Cross / Death Cross) - FIXED
           
           const goldenCross = ema50 > ema200;
+          const deathCross = ema50 < ema200;
           
-          if (goldenCross && currentPrice > ema50) {
-              if (rsi < 70 && currentPrice > ema20) {
-                   decision = 'BUY';
-                   confidenceScore = 92;
-                   reason = `DAILY CHART: Golden Cross (EMA 50 > 200). Price $${currentPrice} holding 50DMA support. Major trend BULLISH.`;
+          // Retest Logic - Check if price has retested EMA 50
+          const recentLows = lows.slice(-10);
+          const recentHighs = highs.slice(-10);
+          const hasRetestedEMA50 = goldenCross ? 
+            recentLows.some(low => Math.abs(low - ema50) / ema50 < 0.015) : // Within 1.5% of EMA50
+            recentHighs.some(high => Math.abs(high - ema50) / ema50 < 0.015);
+          
+          // Volume Confirmation
+          const volumeConfirmation = volumeAboveAverage && volumeRatio > 1.3;
+          
+          // Volume-based indicators (OBV for trend confirmation)
+          const obv = calculateOBV(closes, volumes);
+          const obvTrend = obv.length >= 10 ? obv[obv.length - 1] > obv[obv.length - 10] : false;
+          const obvBearish = obv.length >= 10 ? obv[obv.length - 1] < obv[obv.length - 10] : false;
+          
+          // Candle Patterns
+          const patterns = detectCandlePatterns(opens, highs, lows, closes);
+          
+          // Multiple Timeframe Confirmation (check if price above/below multiple EMAs)
+          const priceAboveMultipleEMAs = currentPrice > ema20 && currentPrice > ema50 && currentPrice > ema200;
+          const priceBelowMultipleEMAs = currentPrice < ema20 && currentPrice < ema50 && currentPrice < ema200;
+          
+          // BUY Signal: Golden Cross + Retest + Volume + OBV + RSI Filter
+          if (goldenCross && (currentPrice > ema50 || hasRetestedEMA50)) {
+              if (rsi > 40 && rsi < 65 && (currentPrice > ema20 || hasRetestedEMA50)) {
+                   if (volumeConfirmation && (obvTrend || priceAboveMultipleEMAs)) {
+                       decision = 'BUY';
+                       confidenceScore = 93 + (hasRetestedEMA50 ? 2 : 0) + (volumeConfirmation ? 3 : 0) + (patterns.isBullishEngulfing ? 2 : 0);
+                       reason = `DAILY CHART: Golden Cross (EMA 50 > 200) confirmed. Price $${currentPrice} ${hasRetestedEMA50 ? 'RETESTED and holding 50DMA support' : 'above 50DMA'}. RSI ${rsi.toFixed(0)} healthy (40-65). ${volumeConfirmation ? 'HIGH VOLUME confirmation' : 'Volume normal'}. OBV ${obvTrend ? 'RISING' : 'flat'}. ${patterns.isBullishEngulfing ? 'Bullish Engulfing pattern' : patterns.isBullishPinBar ? 'Bullish Pin Bar' : 'Price structure bullish'}. Major trend BULLISH.`;
+                   } else {
+                       confidenceScore = 70;
+                       reason = `DAILY: Bullish Trend (Golden Cross) but ${!volumeConfirmation ? 'waiting for volume confirmation' : !obvTrend ? 'OBV not confirming' : 'need stronger confirmation'}. ${hasRetestedEMA50 ? 'Retest complete' : 'Waiting for retest of EMA 50'}.`;
+                   }
               } else {
-                   reason = `DAILY: Bullish Trend (Golden Cross) but RSI ${rsi.toFixed(0)} overextended. Waiting for pullback to EMA 20.`;
+                   confidenceScore = 60;
+                   if (rsi >= 65) {
+                       reason = `DAILY: Bullish Trend (Golden Cross) but RSI ${rsi.toFixed(0)} overextended (>65). Waiting for pullback to EMA 20 or retest of EMA 50.`;
+                   } else if (rsi <= 40) {
+                       reason = `DAILY: Bullish Trend but RSI ${rsi.toFixed(0)} too low (<40). Waiting for strength confirmation.`;
+                   } else {
+                       reason = `DAILY: Golden Cross active but price not yet above EMA 20. Waiting for confirmation.`;
+                   }
               }
           } 
-          else if (!goldenCross && currentPrice < ema50) {
-              if (rsi > 30 && currentPrice < ema20) {
-                   decision = 'SELL';
-                   confidenceScore = 92;
-                   reason = `DAILY CHART: Death Cross (EMA 50 < 200). Price $${currentPrice} rejected at 50DMA. Major trend BEARISH.`;
+          // SELL Signal: Death Cross + Retest + Volume + OBV + RSI Filter
+          else if (deathCross && (currentPrice < ema50 || hasRetestedEMA50)) {
+              if (rsi < 60 && rsi > 35 && (currentPrice < ema20 || hasRetestedEMA50)) {
+                   if (volumeConfirmation && (obvBearish || priceBelowMultipleEMAs)) {
+                       decision = 'SELL';
+                       confidenceScore = 93 + (hasRetestedEMA50 ? 2 : 0) + (volumeConfirmation ? 3 : 0) + (patterns.isBearishEngulfing ? 2 : 0);
+                       reason = `DAILY CHART: Death Cross (EMA 50 < 200) confirmed. Price $${currentPrice} ${hasRetestedEMA50 ? 'RETESTED and rejected at 50DMA' : 'below 50DMA'}. RSI ${rsi.toFixed(0)} healthy (35-60). ${volumeConfirmation ? 'HIGH VOLUME confirmation' : 'Volume normal'}. OBV ${obvBearish ? 'FALLING' : 'flat'}. ${patterns.isBearishEngulfing ? 'Bearish Engulfing pattern' : patterns.isBearishPinBar ? 'Bearish Pin Bar' : 'Price structure bearish'}. Major trend BEARISH.`;
+                   } else {
+                       confidenceScore = 70;
+                       reason = `DAILY: Bearish Trend (Death Cross) but ${!volumeConfirmation ? 'waiting for volume confirmation' : !obvBearish ? 'OBV not confirming' : 'need stronger confirmation'}. ${hasRetestedEMA50 ? 'Retest complete' : 'Waiting for retest of EMA 50'}.`;
+                   }
               } else {
-                   reason = `DAILY: Bearish Trend but RSI ${rsi.toFixed(0)} oversold. Risk of mean reversion. Holding.`;
+                   confidenceScore = 60;
+                   if (rsi <= 35) {
+                       reason = `DAILY: Bearish Trend but RSI ${rsi.toFixed(0)} oversold (<35). Risk of mean reversion. Holding.`;
+                   } else if (rsi >= 60) {
+                       reason = `DAILY: Bearish Trend but RSI ${rsi.toFixed(0)} too high (>60). Waiting for weakness confirmation.`;
+                   } else {
+                       reason = `DAILY: Death Cross active but price not yet below EMA 20. Waiting for confirmation.`;
+                   }
               }
           } else {
               let rsiDesc = "";
               if (rsi >= 70) rsiDesc = ` RSI ${rsi.toFixed(0)} Overbought (>70).`;
               else if (rsi <= 30) rsiDesc = ` RSI ${rsi.toFixed(0)} Oversold (<30).`;
-              reason = `DAILY CHOP: Price interacting with EMA 200 ($${ema200.toFixed(4)}). Trend undefined.${rsiDesc}`;
+              confidenceScore = 45;
+              reason = `DAILY CHOP: Price interacting with EMA 200 ($${ema200.toFixed(4)}). EMA 50/200 ${goldenCross ? 'bullish' : deathCross ? 'bearish' : 'neutral'}. Trend undefined.${rsiDesc} Waiting for cross confirmation.`;
           }
 
         } else if (bot.name === "Dr. Adrian") {
-          // ADRIAN: 4H QUANT (Volatility Squeeze)
+          // ADRIAN: 4H QUANT (Volatility Squeeze + OBV) - FIXED
           
+          // On-Balance Volume (OBV) - REQUIRED IMPLEMENTATION
+          const obv = calculateOBV(closes, volumes);
+          const obvTrend = obv.length >= 5 ? obv[obv.length - 1] > obv[obv.length - 5] : false;
+          const obvBearish = obv.length >= 5 ? obv[obv.length - 1] < obv[obv.length - 5] : false;
+          const obvStrength = obv.length >= 2 ? Math.abs(obv[obv.length - 1] - obv[obv.length - 2]) / Math.abs(obv[obv.length - 2]) : 0;
+          
+          // Bollinger Bands with Adaptive Threshold
           const bbWidth = (bb.upper - bb.lower) / bb.middle;
-          const isSqueeze = bbWidth < 0.05; // Low volatility
+          const historicalBBWidths: number[] = [];
+          for (let i = 20; i < closes.length && i < 50; i++) {
+            const histBB = calculateBollingerBands(closes.slice(0, i+1), 20, 2);
+            const histWidth = (histBB.upper - histBB.lower) / histBB.middle;
+            historicalBBWidths.push(histWidth);
+          }
+          const avgBBWidth = historicalBBWidths.length > 0 ? 
+            historicalBBWidths.reduce((a, b) => a + b, 0) / historicalBBWidths.length : 0.05;
+          const isSqueeze = bbWidth < avgBBWidth * 0.7; // 30% below average = squeeze
           
-          if (isSqueeze) {
-              if (currentPrice > bb.upper && rsi > 60) {
+          // Volatility Filter (ATR-based)
+          const atrPercent = (atr / currentPrice) * 100;
+          const isVolatile = atrPercent > 1.5; // Minimum 1.5% ATR for 4H
+          
+          // Volume confirmation
+          const volumeConfirmation = volumeAboveAverage && volumeRatio > 1.3;
+          
+          // OBV Confirmation
+          const obvConfirmation = (obvTrend && volumeConfirmation) || (obvStrength > 0.1);
+          
+          if (isSqueeze && isVolatile) {
+              // Volatility Squeeze Breakout with OBV confirmation
+              if (currentPrice > bb.upper && rsi > 55 && rsi < 75 && obvConfirmation) {
                    decision = 'BUY';
-                   confidenceScore = 85;
-                   reason = `4H VOLATILITY BREAKOUT: BB Squeeze ending. Price $${currentPrice} breaking Upper Band ($${bb.upper.toFixed(4)}). Expansion imminent.`;
-              } else if (currentPrice < bb.lower && rsi < 40) {
+                   confidenceScore = 88 + (volumeConfirmation ? 5 : 0);
+                   reason = `4H VOLATILITY BREAKOUT: BB Squeeze ending (${(bbWidth*100).toFixed(2)}% < avg ${(avgBBWidth*100).toFixed(2)}%). Price $${currentPrice} breaking Upper Band ($${bb.upper.toFixed(4)}). OBV ${obvTrend ? 'RISING' : 'flat'}. ${volumeConfirmation ? 'HIGH VOLUME' : 'Normal volume'}. RSI ${rsi.toFixed(0)} healthy. Expansion imminent.`;
+              } else if (currentPrice < bb.lower && rsi < 45 && rsi > 25 && obvBearish) {
                    decision = 'SELL';
-                   confidenceScore = 85;
-                   reason = `4H VOLATILITY BREAKDOWN: BB Squeeze ending. Price $${currentPrice} breaking Lower Band ($${bb.lower.toFixed(4)}). Dumping.`;
+                   confidenceScore = 88 + (volumeConfirmation ? 5 : 0);
+                   reason = `4H VOLATILITY BREAKDOWN: BB Squeeze ending. Price $${currentPrice} breaking Lower Band ($${bb.lower.toFixed(4)}). OBV FALLING. ${volumeConfirmation ? 'HIGH VOLUME breakdown' : 'Normal volume'}. RSI ${rsi.toFixed(0)}. Dumping.`;
               } else {
-                   reason = `4H SQUEEZE: Volatility low (${(bbWidth*100).toFixed(2)}%). Coiling for move. Direction unclear.`;
+                   confidenceScore = 60;
+                   reason = `4H SQUEEZE: Volatility low (${(bbWidth*100).toFixed(2)}% < avg). ${!obvConfirmation ? 'OBV not confirming' : 'Waiting for breakout direction'}. ${!isVolatile ? 'Low volatility - skip' : 'Coiling for move'}.`;
               }
-          } else {
-               if (currentPrice > ema20 && rsi > 55 && rsi < 75) {
+          } else if (isVolatile) {
+               // Momentum Trading with OBV
+               if (currentPrice > ema20 && rsi > 50 && rsi < 70 && obvTrend && volumeConfirmation) {
                    decision = 'BUY';
-                   confidenceScore = 70;
-                   reason = `4H MOMENTUM: Price > Mid Band. RSI ${rsi.toFixed(0)} rising. targeting Upper Band ($${bb.upper.toFixed(4)}).`;
-               } else if (currentPrice < ema20 && rsi < 45 && rsi > 25) {
+                   confidenceScore = 75 + (obvConfirmation ? 10 : 0);
+                   reason = `4H MOMENTUM: Price > Mid Band (EMA 20). RSI ${rsi.toFixed(0)} healthy. OBV RISING (strength: ${(obvStrength*100).toFixed(1)}%). ${volumeConfirmation ? 'HIGH VOLUME confirmation' : 'Volume normal'}. Targeting Upper Band ($${bb.upper.toFixed(4)}).`;
+               } else if (currentPrice < ema20 && rsi < 50 && rsi > 30 && obvBearish && volumeConfirmation) {
                    decision = 'SELL';
-                   confidenceScore = 70;
-                   reason = `4H MOMENTUM: Price < Mid Band. RSI ${rsi.toFixed(0)} falling. targeting Lower Band ($${bb.lower.toFixed(4)}).`;
+                   confidenceScore = 75 + (obvStrength > 0.1 ? 10 : 0);
+                   reason = `4H MOMENTUM: Price < Mid Band. RSI ${rsi.toFixed(0)}. OBV FALLING. ${volumeConfirmation ? 'HIGH VOLUME breakdown' : 'Volume normal'}. Targeting Lower Band ($${bb.lower.toFixed(4)}).`;
                } else {
                    let rsiStatus = "neutral";
                    if (rsi >= 70) rsiStatus = "Overbought (>70, Reversion Risk)";
                    else if (rsi <= 30) rsiStatus = "Oversold (<30, Bounce Risk)";
-                   reason = `4H RANGE: Price inside bands. RSI ${rsi.toFixed(0)} is ${rsiStatus}. No clear momentum edge.`;
+                   reason = `4H RANGE: Price inside bands. RSI ${rsi.toFixed(0)} is ${rsiStatus}. ${!obvConfirmation ? 'OBV not confirming' : 'No clear momentum edge'}.`;
                }
+          } else {
+               confidenceScore = 40;
+               reason = `4H LOW VOLATILITY: ATR ${atrPercent.toFixed(2)}% below threshold (1.5%). Skipping trade - insufficient volatility for 4H timeframe.`;
           }
         } else if (bot.name === "Goldy Roger") {
-           // GOLDY ROGER: DAILY GOLD SUPPLY/DEMAND
+           // GOLDY ROGER: DAILY GOLD SUPPLY/DEMAND ZONES - FIXED
            
-           const trendUp = currentPrice > ema50;
-           const isGreen = isGreenCandle(openPrice, currentPrice);
+           // Find Supply/Demand Zones (REQUIRED IMPLEMENTATION)
+           const { supplyZones, demandZones } = findSupplyDemandZones(highs, lows, closes, volumes, 20);
            
-           if (trendUp) {
-               if (rsi < 65 && isGreen && currentPrice > ema20) {
-                   decision = 'BUY';
-                   confidenceScore = 90;
-                   reason = `GOLD DAILY (XAUUSD): Institutional demand detected above EMA 50. Price $${currentPrice} clearing local supply. RSI ${rsi.toFixed(0)} allows room for expansion.`;
+           // Check if price is at Supply/Demand Zone
+           const isAtDemandZone = demandZones.some(zone => 
+               currentPrice >= zone.low * 0.995 && currentPrice <= zone.high * 1.005
+           );
+           const isAtSupplyZone = supplyZones.some(zone => 
+               currentPrice >= zone.low * 0.995 && currentPrice <= zone.high * 1.005
+           );
+           
+           // Liquidity Sweep Detection
+           const recentLow = Math.min(...lows.slice(-10));
+           const recentHigh = Math.max(...highs.slice(-10));
+           const previousLow = Math.min(...lows.slice(-20, -10));
+           const previousHigh = Math.max(...highs.slice(-20, -10));
+           const sweptLiquidityDown = recentLow < previousLow && currentPrice > previousLow; // Bullish reversal
+           const sweptLiquidityUp = recentHigh > previousHigh && currentPrice < previousHigh; // Bearish reversal
+           
+           // Volume Profile
+           const vwap = calculateVolumeProfile(highs, lows, closes, volumes);
+           const priceAboveVWAP = currentPrice > vwap;
+           
+           // Psychological Levels (round numbers for PAXG/Gold)
+           const psychLevel = findNearestPsychologicalLevel(currentPrice, 1); // Round to nearest $1
+           const isAtPsychologicalLevel = psychLevel !== null;
+           
+           // Candle Patterns
+           const patterns = detectCandlePatterns(opens, highs, lows, closes);
+           
+           // Trend Analysis
+           const trendUp = currentPrice > ema50 && currentPrice > ema20;
+           const trendDown = currentPrice < ema50 && currentPrice < ema20;
+           
+           // Volume Confirmation
+           const volumeConfirmation = volumeAboveAverage && volumeRatio > 1.5;
+           
+           // BUY Signal: Demand Zone + Liquidity Sweep + Volume + Candle Pattern
+           if (trendUp || isAtDemandZone || sweptLiquidityDown) {
+               if ((isAtDemandZone || sweptLiquidityDown) && 
+                   rsi > 40 && rsi < 65 && 
+                   (patterns.isBullishPinBar || patterns.isBullishEngulfing || isGreenCandle(openPrice, currentPrice))) {
+                   if (volumeConfirmation || priceAboveVWAP) {
+                       decision = 'BUY';
+                       confidenceScore = 92 + (sweptLiquidityDown ? 3 : 0) + (volumeConfirmation ? 3 : 0);
+                       const zoneInfo = isAtDemandZone ? 'DEMAND ZONE' : sweptLiquidityDown ? 'LIQUIDITY SWEEP' : 'above EMA 50';
+                       reason = `GOLD DAILY (PAXG): Price $${currentPrice} at ${zoneInfo}. ${sweptLiquidityDown ? 'Liquidity swept below - reversal expected' : 'Institutional demand zone'}. ${patterns.isBullishPinBar ? 'Bullish Pin Bar rejection' : patterns.isBullishEngulfing ? 'Bullish Engulfing' : 'Green candle'}. RSI ${rsi.toFixed(0)} healthy. ${volumeConfirmation ? 'HIGH VOLUME confirmation' : 'Volume normal'}. ${isAtPsychologicalLevel ? `At psychological level $${psychLevel}` : ''}. VWAP: $${vwap.toFixed(4)}.`;
+                   } else {
+                       confidenceScore = 70;
+                       reason = `GOLD DAILY: At demand zone but waiting for volume confirmation.`;
+                   }
                } else if (rsi > 70) {
-                   reason = `GOLD DAILY: Strong uptrend but RSI ${rsi.toFixed(0)} is OVERBOUGHT (>70). Institutional distribution likely. Awaiting pullback.`;
+                   confidenceScore = 50;
+                   reason = `GOLD DAILY: Strong uptrend but RSI ${rsi.toFixed(0)} is OVERBOUGHT (>70). Institutional distribution likely. Awaiting pullback to demand zone.`;
                } else {
-                   reason = `GOLD DAILY: Price above EMA 50 but consolidating. Volume profile neutral.`;
+                   confidenceScore = 60;
+                   reason = `GOLD DAILY: Price above EMA 50. ${isAtDemandZone ? 'At demand zone but waiting for confirmation' : 'Waiting for demand zone entry'}.`;
+               }
+           } 
+           // SELL Signal: Supply Zone + Liquidity Sweep + Volume + Candle Pattern
+           else if (trendDown || isAtSupplyZone || sweptLiquidityUp) {
+               if ((isAtSupplyZone || sweptLiquidityUp) && 
+                   rsi < 60 && rsi > 35 && 
+                   (patterns.isBearishPinBar || patterns.isBearishEngulfing || !isGreenCandle(openPrice, currentPrice))) {
+                   if (volumeConfirmation || !priceAboveVWAP) {
+                       decision = 'SELL';
+                       confidenceScore = 92 + (sweptLiquidityUp ? 3 : 0) + (volumeConfirmation ? 3 : 0);
+                       const zoneInfo = isAtSupplyZone ? 'SUPPLY ZONE' : sweptLiquidityUp ? 'LIQUIDITY SWEEP' : 'below EMA 50';
+                       reason = `GOLD DAILY (PAXG): Price $${currentPrice} at ${zoneInfo}. ${sweptLiquidityUp ? 'Liquidity swept above - reversal expected' : 'Institutional supply zone'}. ${patterns.isBearishPinBar ? 'Bearish Pin Bar rejection' : patterns.isBearishEngulfing ? 'Bearish Engulfing' : 'Red candle'}. RSI ${rsi.toFixed(0)} healthy. ${volumeConfirmation ? 'HIGH VOLUME confirmation' : 'Volume normal'}. ${isAtPsychologicalLevel ? `At psychological level $${psychLevel}` : ''}. VWAP: $${vwap.toFixed(4)}.`;
+                   } else {
+                       confidenceScore = 70;
+                       reason = `GOLD DAILY: At supply zone but waiting for volume confirmation.`;
+                   }
+               } else if (rsi < 30) {
+                   confidenceScore = 50;
+                   reason = `GOLD DAILY: Bearish trend but RSI ${rsi.toFixed(0)} is OVERSOLD (<30). Commercial hedging expected here. Risk of bounce to supply zone.`;
+               } else {
+                   confidenceScore = 60;
+                   reason = `GOLD DAILY: Price below EMA 50. ${isAtSupplyZone ? 'At supply zone but waiting for confirmation' : 'Waiting for supply zone entry'}.`;
                }
            } else {
-               if (rsi > 35 && !isGreen && currentPrice < ema20) {
-                   decision = 'SELL';
-                   confidenceScore = 90;
-                   reason = `GOLD DAILY (XAUUSD): Rejection from liquidity zone below EMA 50. Price $${currentPrice} breaking structure. RSI ${rsi.toFixed(0)} supports further downside.`;
-               } else if (rsi < 30) {
-                   reason = `GOLD DAILY: Bearish trend but RSI ${rsi.toFixed(0)} is OVERSOLD (<30). Commercial hedging expected here. Risk of bounce.`;
-               } else {
-                   reason = `GOLD DAILY: Price below EMA 50. Chop zone between demand and supply. No clear liquidity sweep.`;
-               }
+               confidenceScore = 50;
+               reason = `GOLD DAILY: Price consolidating between demand ($${demandZones.length > 0 ? demandZones[demandZones.length-1].low.toFixed(4) : 'N/A'}) and supply ($${supplyZones.length > 0 ? supplyZones[supplyZones.length-1].high.toFixed(4) : 'N/A'}) zones. No clear liquidity sweep. RSI ${rsi.toFixed(0)}.`;
            }
         }
 
@@ -581,38 +961,67 @@ export default function App() {
               if (b.positions.length >= MAX_POSITIONS) return b;
 
               const leverage = b.leverage;
-              const tradeMargin = Math.min(b.balance, 20 + Math.random() * 10);
               
-              // RISK PROFILE CALCULATIONS
+              // RISK-BASED POSITION SIZING (IMPROVED)
+              // Calculate position size based on account risk % (2% per trade)
+              const accountRiskPercent = 0.02; // 2% risk per trade
+              const accountRiskAmount = b.balance * accountRiskPercent;
+              
+              // RISK PROFILE CALCULATIONS (OPTIMIZED)
               let riskMultiplier = 1.5; // Base Stop Distance in ATR
               let rewardRatio = 2.0;    // Base Reward to Risk Ratio
-
+              
+              // Calculate stop distance first (will be used to size position)
+              const stopDistance = atr * riskMultiplier;
+              
+              // Agent-specific risk parameters (OPTIMIZED)
               if (b.name === "Chloe") {
-                  riskMultiplier = 1.5;  // Tighter stop for weekly since candles are huge
+                  riskMultiplier = 2.5;  // Wider stop for weekly (candles move 10-20%)
                   rewardRatio = 3.0;     // Hunting 1:3 Risk/Reward (Home Runs)
               } else if (b.name === "Sebastian") {
-                  riskMultiplier = 2.0;  // Wide stop for Daily noise
-                  rewardRatio = 2.0;     // Conservative 1:2
+                  riskMultiplier = 1.5;  // Tighter stop for Daily with retest confirmation
+                  rewardRatio = 2.5;     // Improved 1:2.5
               } else if (b.name === "Dr. Adrian") {
-                  riskMultiplier = 1.0;  // Tight Scalp Stop
-                  rewardRatio = 1.5;     // Quick 1:1.5
+                  riskMultiplier = 1.5;  // Wider stop for 4H (was too tight at 1.0)
+                  rewardRatio = 2.0;     // Improved 1:2 (was 1:1.5)
               } else if (b.name === "Goldy Roger") {
-                  riskMultiplier = 1.5;
-                  rewardRatio = 2.0;
+                  riskMultiplier = 1.5;  // For Daily Gold
+                  rewardRatio = 2.5;     // Improved 1:2.5
               }
+              
+              // Recalculate stop distance with agent-specific multiplier
+              const finalStopDistance = atr * riskMultiplier;
+              const targetDistance = finalStopDistance * rewardRatio;
+              
+              // Calculate position size based on risk amount and stop distance
+              // Position size = Risk Amount / (Stop Distance * Leverage)
+              let tradeMargin = 0;
+              if (decision === 'BUY') {
+                  tradeMargin = accountRiskAmount / (finalStopDistance / currentPrice) / leverage;
+              } else {
+                  tradeMargin = accountRiskAmount / (finalStopDistance / currentPrice) / leverage;
+              }
+              
+              // Cap position size (max 30% of balance per trade, min 5%)
+              const maxPositionSize = b.balance * 0.30;
+              const minPositionSize = Math.max(5, b.balance * 0.05);
+              tradeMargin = Math.min(Math.max(tradeMargin, minPositionSize), maxPositionSize, b.balance - 5);
+              
+              // Confidence-based position sizing (higher confidence = larger position)
+              const confidenceMultiplier = confidenceScore / 100; // 0.75 to 1.0
+              tradeMargin = tradeMargin * confidenceMultiplier;
+              
+              // Round down to 1 decimal
+              tradeMargin = Math.floor(tradeMargin * 10) / 10;
 
-              // Calculate Distance
-              const stopDistance = atr * riskMultiplier;
-              const targetDistance = stopDistance * rewardRatio;
-
-              // Determine Price Levels
+              // Determine Price Levels (using already calculated distances)
               let tpPrice = 0, slPrice = 0;
               if (decision === 'BUY') {
                   tpPrice = currentPrice + targetDistance;
-                  slPrice = currentPrice - stopDistance;
+                  slPrice = currentPrice - finalStopDistance;
               } else {
                   tpPrice = currentPrice - targetDistance;
-                  slPrice = currentPrice + stopDistance;
+                  slPrice = currentPrice + finalStopDistance;
               }
 
               // SAFETY: Ensure SL doesn't exceed liquidation approximation (approx 80% move / lev)
@@ -711,33 +1120,58 @@ export default function App() {
               const unrealizedPnL = pnlPercent * pos.size * pos.leverage;
               const roiPercent = (unrealizedPnL / pos.size) * 100;
 
-              // --- SMART TRAILING STOP LOGIC ---
+              // --- SMART TRAILING STOP LOGIC - FIXED ---
               let updatedPos = { ...pos, unrealizedPnL };
               const trend = marketTrend[pos.symbol] || 'FLAT';
               
+              // FIXED: Trailing should activate when PROFITABLE and trend is FAVORABLE
               if (!pos.isTrailing && roiPercent > 10) {
                   let activateTrailing = false;
                   let newSl = pos.stopLoss;
 
+                  // BUY position: Trail when trend is UP (profitable) or price is above entry significantly
                   if (pos.type === 'BUY') {
-                      if (trend === 'DOWN') {
+                      if (trend === 'UP' || currentPrice > pos.entryPrice * 1.05) {
                           activateTrailing = true;
-                          // Lock in 3% ROI worth of profit
+                          // Lock in profit: Move SL to breakeven or 3% profit (whichever is higher)
+                          const breakeven = pos.entryPrice;
                           const profitLockPrice = pos.entryPrice * (1 + (0.03 / pos.leverage));
-                          newSl = profitLockPrice;
+                          newSl = Math.max(breakeven * 1.001, profitLockPrice); // Slightly above breakeven
                       }
-                  } else {
-                      if (trend === 'UP') {
+                  } 
+                  // SELL position: Trail when trend is DOWN (profitable) or price is below entry significantly
+                  else {
+                      if (trend === 'DOWN' || currentPrice < pos.entryPrice * 0.95) {
                           activateTrailing = true;
+                          const breakeven = pos.entryPrice;
                           const profitLockPrice = pos.entryPrice * (1 - (0.03 / pos.leverage));
-                          newSl = profitLockPrice;
+                          newSl = Math.min(breakeven * 0.999, profitLockPrice); // Slightly below breakeven
+                      }
+                  }
+
+                  // Dynamic trailing: Update SL to lock more profit if price moves favorably
+                  if (pos.isTrailing) {
+                      if (pos.type === 'BUY' && currentPrice > pos.entryPrice) {
+                          // Update SL to be 2% below current price (locking profit)
+                          const newTrailingSL = currentPrice * 0.98;
+                          if (newTrailingSL > pos.stopLoss) {
+                              newSl = newTrailingSL;
+                              activateTrailing = true;
+                          }
+                      } else if (pos.type === 'SELL' && currentPrice < pos.entryPrice) {
+                          // Update SL to be 2% above current price (locking profit)
+                          const newTrailingSL = currentPrice * 1.02;
+                          if (newTrailingSL < pos.stopLoss) {
+                              newSl = newTrailingSL;
+                              activateTrailing = true;
+                          }
                       }
                   }
 
                   if (activateTrailing) {
                       updatedPos.isTrailing = true;
                       updatedPos.stopLoss = newSl;
-                      addLog(`${bot.name} ACTIVATED SMART TRAILING on ${pos.symbol}. Locked SL @ ${newSl.toFixed(4)}`, 'INFO');
+                      addLog(`${bot.name} ACTIVATED SMART TRAILING on ${pos.symbol}. Locked SL @ ${newSl.toFixed(4)} (${pos.type === 'BUY' ? trend === 'UP' ? 'trend UP' : 'profit locked' : trend === 'DOWN' ? 'trend DOWN' : 'profit locked'})`, 'INFO');
                   }
               }
 
