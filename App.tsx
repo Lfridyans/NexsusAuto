@@ -416,20 +416,63 @@ export default function App() {
 
   // --- REAL-TIME MARKET DATA FETCHING ---
   const fetchMarketPrices = async () => {
-    // Use working CORS proxy (allorigins.win is most reliable)
+    // PRIMARY: CoinGecko API (No CORS restrictions, most reliable)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1&sparkline=false&price_change_percentage=1h', {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const json = await response.json();
+        const newPrices: Record<string, number> = {};
+        const newTrends: Record<string, 'UP' | 'DOWN'> = {};
+
+        json.forEach((asset: any) => {
+          // Map CoinGecko symbols to Binance symbols (USDT pairs)
+          const symbol = `${asset.symbol.toUpperCase()}USDT`;
+          const price = parseFloat(asset.current_price);
+          if (!isNaN(price) && price > 0) {
+            newPrices[symbol] = price;
+            if (prevPricesRef.current[symbol]) {
+              newTrends[symbol] = price > prevPricesRef.current[symbol] ? 'UP' : 'DOWN';
+            }
+          }
+        });
+        
+        if (Object.keys(newPrices).length > 0) {
+          prevPricesRef.current = newPrices;
+          setMarketPrices(newPrices);
+          setMarketTrend(newTrends);
+          setIsOnline(true);
+          return; // Success with CoinGecko
+        }
+      }
+    } catch (e) {
+      // CoinGecko failed, try Binance with proxy
+      console.warn("CoinGecko API failed, trying Binance with proxy...");
+    }
+    
+    // FALLBACK: Binance API with CORS proxy
     const corsProxy = 'https://api.allorigins.win/raw?url=';
     const binanceTicker = 'https://api.binance.com/api/v3/ticker/price';
     const binanceEndpoints: string[] = [];
     
-    // Primary: CORS proxy (most reliable for GitHub Pages)
+    // Try CORS proxy first (works for GitHub Pages)
     binanceEndpoints.push(`${corsProxy}${encodeURIComponent(binanceTicker)}`);
     
-    // Fallback: Direct endpoints (might work in some browsers/networks)
+    // Then try direct endpoints (might work in some networks)
     binanceEndpoints.push(
       'https://api.binance.com/api/v3/ticker/price',
-      'https://api1.binance.com/api/v3/ticker/price',
-      'https://api2.binance.com/api/v3/ticker/price',
-      'https://api3.binance.com/api/v3/ticker/price'
+      'https://api1.binance.com/api/v3/ticker/price'
     );
 
     // Try each endpoint with timeout
@@ -493,50 +536,7 @@ export default function App() {
       }
     }
     
-    // Fallback: Try CoinGecko API (no CORS issues, free tier)
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      
-      // Get top 100 cryptocurrencies from CoinGecko
-      const response = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false', {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const json = await response.json();
-        const newPrices: Record<string, number> = {};
-        const newTrends: Record<string, 'UP' | 'DOWN'> = {};
-
-        json.forEach((asset: any) => {
-          const symbol = `${asset.symbol.toUpperCase()}USDT`;
-          const price = parseFloat(asset.current_price);
-          if (!isNaN(price) && price > 0) {
-            newPrices[symbol] = price;
-            if (prevPricesRef.current[symbol]) {
-              newTrends[symbol] = price > prevPricesRef.current[symbol] ? 'UP' : 'DOWN';
-            }
-          }
-        });
-        
-        if (Object.keys(newPrices).length > 0) {
-          prevPricesRef.current = newPrices;
-          setMarketPrices(newPrices);
-          setMarketTrend(newTrends);
-          setIsOnline(true);
-          return;
-        }
-      }
-    } catch (e) { 
-      console.warn("All API endpoints failed"); 
-    }
-    
+    // If all Binance endpoints failed, set offline
     setIsOnline(false);
   };
 
@@ -631,20 +631,18 @@ export default function App() {
 
       try {
         // INCREASED LIMIT TO 200 to support EMA 200 calculation
-        // Use working CORS proxy for klines data
+        // PRIMARY: Use CORS proxy for klines data (most reliable for GitHub Pages)
         const corsProxy = 'https://api.allorigins.win/raw?url=';
         const binanceBase = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`;
         const endpoints: string[] = [];
         
-        // Primary: CORS proxy (most reliable)
+        // Primary: CORS proxy (works from GitHub Pages)
         endpoints.push(`${corsProxy}${encodeURIComponent(binanceBase)}`);
         
-        // Fallback: Direct endpoints
+        // Fallback: Direct endpoints (might work in some networks, but usually blocked by CORS)
         endpoints.push(
           `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
-          `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
-          `https://api2.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
-          `https://api3.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`
+          `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`
         );
 
         let data = null;
