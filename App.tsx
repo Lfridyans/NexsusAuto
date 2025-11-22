@@ -416,8 +416,11 @@ export default function App() {
 
   // --- REAL-TIME MARKET DATA FETCHING ---
   const fetchMarketPrices = async () => {
+    // Using CORS proxy for public Binance API
+    const corsProxy = 'https://api.allorigins.win/raw?url=';
+    const binanceTicker = 'https://api.binance.com/api/v3/ticker/price';
     const binanceEndpoints = [
-      'https://data-api.binance.vision/api/v3/ticker/price', 
+      `${corsProxy}${encodeURIComponent(binanceTicker)}`,
       'https://api.binance.com/api/v3/ticker/price',
       'https://api1.binance.com/api/v3/ticker/price'
     ];
@@ -563,8 +566,11 @@ export default function App() {
 
       try {
         // INCREASED LIMIT TO 200 to support EMA 200 calculation
+        // Using CORS proxy to bypass CORS restrictions
+        const corsProxy = 'https://api.allorigins.win/raw?url=';
+        const binanceBase = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`;
         const endpoints = [
-            `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
+            `${corsProxy}${encodeURIComponent(binanceBase)}`,
             `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`,
             `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${apiInterval}&limit=200`
         ];
@@ -1166,11 +1172,15 @@ export default function App() {
 
               // SAFETY: Ensure SL doesn't exceed liquidation approximation (approx 80% move / lev)
               const liqDistance = (currentPrice * 0.8) / leverage;
-              if (stopDistance > liqDistance) {
+              const actualSLDistance = decision === 'BUY' ? (currentPrice - slPrice) : (slPrice - currentPrice);
+              if (actualSLDistance > liqDistance) {
                   // Clamp SL to be safe if ATR is too wild
                   const safeStopDistance = liqDistance * 0.9;
-                  if (decision === 'BUY') slPrice = currentPrice - safeStopDistance;
-                  else slPrice = currentPrice + safeStopDistance;
+                  if (decision === 'BUY') {
+                      slPrice = currentPrice - safeStopDistance;
+                  } else {
+                      slPrice = currentPrice + safeStopDistance;
+                  }
                   finalReason += ` [SL clamped for Safety]`;
               }
 
