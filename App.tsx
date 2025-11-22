@@ -540,10 +540,100 @@ export default function App() {
     setIsOnline(false);
   };
 
+  // --- REAL-TIME PRICE FROM WEBSOCKET (SYNC WITH TRADINGVIEW CHART) ---
   useEffect(() => {
+    // Use Binance WebSocket Stream for real-time price (same source as TradingView chart)
+    // This ensures price data matches exactly what's displayed on the chart
+    const symbols = CRYPTO_UNIVERSE.map(c => c.symbol.toLowerCase()).slice(0, 100); // Top 100 pairs
+    
+    // Binance WebSocket requires subscription via stream endpoint
+    // For multiple streams, use combine stream
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout | null = null;
+    
+    const connectWebSocket = () => {
+      try {
+        // Binance WebSocket: Subscribe to ticker streams for all symbols
+        // Format: wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker/...
+        const streams = symbols.map(s => `${s}@ticker`).join('/');
+        const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
+        
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          setIsOnline(true);
+          addLog('WebSocket connected: Real-time price sync with TradingView active', 'INFO');
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            
+            // Binance stream format: { stream: "btcusdt@ticker", data: { s: "BTCUSDT", c: "50000", ... } }
+            if (message.stream && message.stream.includes('@ticker') && message.data) {
+              const ticker = message.data;
+              if (ticker.s && ticker.c) {
+                const symbol = ticker.s; // e.g., "BTCUSDT"
+                const price = parseFloat(ticker.c); // Current price (real-time from Binance)
+                
+                if (!isNaN(price) && price > 0) {
+                  setMarketPrices(prev => {
+                    const newPrices = { ...prev, [symbol]: price };
+                    
+                    // Update price trends
+                    if (prevPricesRef.current[symbol] !== undefined) {
+                      const newTrend = price > prevPricesRef.current[symbol] ? 'UP' : 'DOWN';
+                      setMarketTrend(prev => ({ ...prev, [symbol]: newTrend }));
+                    }
+                    
+                    // Update reference
+                    prevPricesRef.current[symbol] = price;
+                    return newPrices;
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            console.error('WebSocket message parse error:', e);
+          }
+        };
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          setIsOnline(false);
+        };
+        
+        ws.onclose = () => {
+          setIsOnline(false);
+          // Auto-reconnect after 3 seconds
+          reconnectTimeout = setTimeout(() => {
+            if (!ws || ws.readyState === WebSocket.CLOSED) {
+              connectWebSocket();
+            }
+          }, 3000);
+        };
+      } catch (e) {
+        console.error('WebSocket connection error:', e);
+        setIsOnline(false);
+        // Fallback to API polling if WebSocket completely fails
+        fetchMarketPrices();
+        const fallbackInterval = setInterval(fetchMarketPrices, 5000);
+        return () => clearInterval(fallbackInterval);
+      }
+    };
+    
+    // Initial connection
+    connectWebSocket();
+    
+    // Also fetch initial prices via API for all symbols (one-time load)
     fetchMarketPrices();
-    const interval = setInterval(fetchMarketPrices, 3000);
-    return () => clearInterval(interval);
+    
+    return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
   }, []);
 
   // --- SHADOW AGENT KAEL (SWARM OPTIMIZER) ---
