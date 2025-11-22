@@ -531,7 +531,9 @@ export default function App() {
     // Select Candidates Pool
     let candidates: any[] = [];
     if (bot.name === "Goldy Roger") {
-       candidates = CRYPTO_UNIVERSE.filter(c => c.symbol === 'PAXGUSDT');
+       // Scalper: Trade all crypto pairs (prioritize high volume pairs)
+       candidates = CRYPTO_UNIVERSE.filter(c => c.volatility !== 'Low'); // Skip low volatility pairs
+       if (candidates.length === 0) candidates = CRYPTO_UNIVERSE;
     } else {
        candidates = bot.targetSector === 'ALL' ? CRYPTO_UNIVERSE : CRYPTO_UNIVERSE.filter(c => c.sector === bot.targetSector);
     }
@@ -836,91 +838,106 @@ export default function App() {
                reason = `4H LOW VOLATILITY: ATR ${atrPercent.toFixed(2)}% below threshold (1.5%). Skipping trade - insufficient volatility for 4H timeframe.`;
           }
         } else if (bot.name === "Goldy Roger") {
-           // GOLDY ROGER: DAILY GOLD SUPPLY/DEMAND ZONES - FIXED
+           // GOLDY ROGER: HIGH-FREQUENCY SCALPER (5-15m) - ALL CRYPTO PAIRS
            
-           // Find Supply/Demand Zones (REQUIRED IMPLEMENTATION)
-           const { supplyZones, demandZones } = findSupplyDemandZones(highs, lows, closes, volumes, 20);
+           // Fast EMA Cross for Scalping (5/13 for quick signals)
+           const ema5 = calculateEMA(closes, 5);
+           const ema13 = calculateEMA(closes, 13);
+           const ema9 = calculateEMA(closes, 9);
+           const ema21 = calculateEMA(closes, 21);
            
-           // Check if price is at Supply/Demand Zone
-           const isAtDemandZone = demandZones.some(zone => 
-               currentPrice >= zone.low * 0.995 && currentPrice <= zone.high * 1.005
-           );
-           const isAtSupplyZone = supplyZones.some(zone => 
-               currentPrice >= zone.low * 0.995 && currentPrice <= zone.high * 1.005
-           );
+           // Fast EMA Cross Signals
+           const fastBullishCross = ema5 > ema13 && closes[closes.length - 2] <= ema13 && currentPrice > ema13;
+           const fastBearishCross = ema5 < ema13 && closes[closes.length - 2] >= ema13 && currentPrice < ema13;
+           const strongTrendUp = ema5 > ema13 && ema13 > ema21 && currentPrice > ema5;
+           const strongTrendDown = ema5 < ema13 && ema13 < ema21 && currentPrice < ema5;
            
-           // Liquidity Sweep Detection
-           const recentLow = Math.min(...lows.slice(-10));
-           const recentHigh = Math.max(...highs.slice(-10));
-           const previousLow = Math.min(...lows.slice(-20, -10));
-           const previousHigh = Math.max(...highs.slice(-20, -10));
-           const sweptLiquidityDown = recentLow < previousLow && currentPrice > previousLow; // Bullish reversal
-           const sweptLiquidityUp = recentHigh > previousHigh && currentPrice < previousHigh; // Bearish reversal
+           // Volume Spike Detection (critical for scalping)
+           const volumeSpike = volumeRatio > 1.8; // 80% above average = spike
+           const strongVolume = volumeRatio > 1.5; // 50% above average
            
-           // Volume Profile
+           // Volume Profile for quick reference
            const vwap = calculateVolumeProfile(highs, lows, closes, volumes);
            const priceAboveVWAP = currentPrice > vwap;
            
-           // Psychological Levels (round numbers for PAXG/Gold)
-           const psychLevel = findNearestPsychologicalLevel(currentPrice, 1); // Round to nearest $1
-           const isAtPsychologicalLevel = psychLevel !== null;
+           // Bollinger Bands for volatility check
+           const bbWidth = (bb.upper - bb.lower) / bb.middle;
+           const isVolatile = bbWidth > 0.02; // 2% width minimum for scalping
+           const nearUpperBand = currentPrice > bb.upper * 0.995 && currentPrice <= bb.upper * 1.005;
+           const nearLowerBand = currentPrice < bb.lower * 1.005 && currentPrice >= bb.lower * 0.995;
            
-           // Candle Patterns
+           // Candle Patterns (quick detection)
            const patterns = detectCandlePatterns(opens, highs, lows, closes);
            
-           // Trend Analysis
-           const trendUp = currentPrice > ema50 && currentPrice > ema20;
-           const trendDown = currentPrice < ema50 && currentPrice < ema20;
+           // Price Momentum (quick moves)
+           const priceChange = (currentPrice - closes[closes.length - 2]) / closes[closes.length - 2] * 100;
+           const strongMomentum = Math.abs(priceChange) > 0.3; // 0.3% move = momentum
            
-           // Volume Confirmation
-           const volumeConfirmation = volumeAboveAverage && volumeRatio > 1.5;
+           // RSI for Scalping (momentum, not overbought/oversold)
+           const rsiMomentum = rsi > 55 && rsi < 75; // Bullish momentum zone
+           const rsiBearishMomentum = rsi < 45 && rsi > 25; // Bearish momentum zone
+           const rsiOverbought = rsi > 75;
+           const rsiOversold = rsi < 25;
            
-           // BUY Signal: Demand Zone + Liquidity Sweep + Volume + Candle Pattern
-           if (trendUp || isAtDemandZone || sweptLiquidityDown) {
-               if ((isAtDemandZone || sweptLiquidityDown) && 
-                   rsi > 40 && rsi < 65 && 
-                   (patterns.isBullishPinBar || patterns.isBullishEngulfing || isGreenCandle(openPrice, currentPrice))) {
-                   if (volumeConfirmation || priceAboveVWAP) {
+           // ATR percent for volatility check
+           const atrPercent = (atr / currentPrice) * 100;
+           const sufficientVolatility = atrPercent > 0.5; // 0.5% ATR minimum for scalping
+           
+           // BUY Signal: Fast EMA Cross + Volume Spike + Momentum + RSI
+           if (fastBullishCross || strongTrendUp) {
+               if (rsiMomentum && !rsiOverbought && volumeSpike && sufficientVolatility) {
+                   if (strongMomentum && (patterns.isBullishEngulfing || patterns.isBullishPinBar || isGreenCandle(openPrice, currentPrice))) {
                        decision = 'BUY';
-                       confidenceScore = 92 + (sweptLiquidityDown ? 3 : 0) + (volumeConfirmation ? 3 : 0);
-                       const zoneInfo = isAtDemandZone ? 'DEMAND ZONE' : sweptLiquidityDown ? 'LIQUIDITY SWEEP' : 'above EMA 50';
-                       reason = `GOLD DAILY (PAXG): Price $${currentPrice} at ${zoneInfo}. ${sweptLiquidityDown ? 'Liquidity swept below - reversal expected' : 'Institutional demand zone'}. ${patterns.isBullishPinBar ? 'Bullish Pin Bar rejection' : patterns.isBullishEngulfing ? 'Bullish Engulfing' : 'Green candle'}. RSI ${rsi.toFixed(0)} healthy. ${volumeConfirmation ? 'HIGH VOLUME confirmation' : 'Volume normal'}. ${isAtPsychologicalLevel ? `At psychological level $${psychLevel}` : ''}. VWAP: $${vwap.toFixed(4)}.`;
+                       confidenceScore = 88 + (volumeSpike ? 5 : 0) + (fastBullishCross ? 3 : 0) + (strongMomentum ? 2 : 0);
+                       reason = `5-15M SCALP: ${fastBullishCross ? 'FAST EMA 5/13 CROSS' : 'Strong uptrend'}. Price $${currentPrice} above EMA 5 ($${ema5.toFixed(4)}). ${strongTrendUp ? 'EMA stack bullish (5>13>21)' : 'EMA 5>13 bullish'}. RSI ${rsi.toFixed(0)} momentum zone (55-75). ${volumeSpike ? 'HIGH VOLUME SPIKE (' + volumeRatio.toFixed(2) + 'x)' : 'Strong volume'}. ${strongMomentum ? `Momentum: ${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%` : ''}. ${patterns.isBullishEngulfing ? 'Bullish Engulfing' : patterns.isBullishPinBar ? 'Bullish Pin Bar' : 'Green candle'}. VWAP: $${vwap.toFixed(4)}. ATR: ${atrPercent.toFixed(2)}%. Quick scalp target.`;
                    } else {
                        confidenceScore = 70;
-                       reason = `GOLD DAILY: At demand zone but waiting for volume confirmation.`;
+                       reason = `5-15M: ${fastBullishCross ? 'EMA cross' : 'Uptrend'} detected but waiting for ${!strongMomentum ? 'momentum confirmation' : !volumeSpike ? 'volume spike' : 'candle pattern'}.`;
                    }
-               } else if (rsi > 70) {
+               } else if (rsiOverbought) {
                    confidenceScore = 50;
-                   reason = `GOLD DAILY: Strong uptrend but RSI ${rsi.toFixed(0)} is OVERBOUGHT (>70). Institutional distribution likely. Awaiting pullback to demand zone.`;
+                   reason = `5-15M: Bullish cross but RSI ${rsi.toFixed(0)} OVERBOUGHT (>75). Risk of reversal. Skip.`;
                } else {
                    confidenceScore = 60;
-                   reason = `GOLD DAILY: Price above EMA 50. ${isAtDemandZone ? 'At demand zone but waiting for confirmation' : 'Waiting for demand zone entry'}.`;
+                   reason = `5-15M: ${fastBullishCross ? 'EMA cross' : 'Uptrend'} but ${!volumeSpike ? 'no volume spike' : !sufficientVolatility ? 'low volatility (ATR: ' + atrPercent.toFixed(2) + '%)' : 'RSI not in momentum zone'}. Waiting.`;
                }
            } 
-           // SELL Signal: Supply Zone + Liquidity Sweep + Volume + Candle Pattern
-           else if (trendDown || isAtSupplyZone || sweptLiquidityUp) {
-               if ((isAtSupplyZone || sweptLiquidityUp) && 
-                   rsi < 60 && rsi > 35 && 
-                   (patterns.isBearishPinBar || patterns.isBearishEngulfing || !isGreenCandle(openPrice, currentPrice))) {
-                   if (volumeConfirmation || !priceAboveVWAP) {
+           // SELL Signal: Fast EMA Cross + Volume Spike + Momentum + RSI
+           else if (fastBearishCross || strongTrendDown) {
+               if (rsiBearishMomentum && !rsiOversold && volumeSpike && sufficientVolatility) {
+                   if (strongMomentum && (patterns.isBearishEngulfing || patterns.isBearishPinBar || !isGreenCandle(openPrice, currentPrice))) {
                        decision = 'SELL';
-                       confidenceScore = 92 + (sweptLiquidityUp ? 3 : 0) + (volumeConfirmation ? 3 : 0);
-                       const zoneInfo = isAtSupplyZone ? 'SUPPLY ZONE' : sweptLiquidityUp ? 'LIQUIDITY SWEEP' : 'below EMA 50';
-                       reason = `GOLD DAILY (PAXG): Price $${currentPrice} at ${zoneInfo}. ${sweptLiquidityUp ? 'Liquidity swept above - reversal expected' : 'Institutional supply zone'}. ${patterns.isBearishPinBar ? 'Bearish Pin Bar rejection' : patterns.isBearishEngulfing ? 'Bearish Engulfing' : 'Red candle'}. RSI ${rsi.toFixed(0)} healthy. ${volumeConfirmation ? 'HIGH VOLUME confirmation' : 'Volume normal'}. ${isAtPsychologicalLevel ? `At psychological level $${psychLevel}` : ''}. VWAP: $${vwap.toFixed(4)}.`;
+                       confidenceScore = 88 + (volumeSpike ? 5 : 0) + (fastBearishCross ? 3 : 0) + (strongMomentum ? 2 : 0);
+                       reason = `5-15M SCALP: ${fastBearishCross ? 'FAST EMA 5/13 CROSS DOWN' : 'Strong downtrend'}. Price $${currentPrice} below EMA 5 ($${ema5.toFixed(4)}). ${strongTrendDown ? 'EMA stack bearish (5<13<21)' : 'EMA 5<13 bearish'}. RSI ${rsi.toFixed(0)} momentum zone (25-45). ${volumeSpike ? 'HIGH VOLUME SPIKE (' + volumeRatio.toFixed(2) + 'x)' : 'Strong volume'}. ${strongMomentum ? `Momentum: ${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%` : ''}. ${patterns.isBearishEngulfing ? 'Bearish Engulfing' : patterns.isBearishPinBar ? 'Bearish Pin Bar' : 'Red candle'}. VWAP: $${vwap.toFixed(4)}. ATR: ${atrPercent.toFixed(2)}%. Quick scalp target.`;
                    } else {
                        confidenceScore = 70;
-                       reason = `GOLD DAILY: At supply zone but waiting for volume confirmation.`;
+                       reason = `5-15M: ${fastBearishCross ? 'EMA cross down' : 'Downtrend'} detected but waiting for ${!strongMomentum ? 'momentum confirmation' : !volumeSpike ? 'volume spike' : 'candle pattern'}.`;
                    }
-               } else if (rsi < 30) {
+               } else if (rsiOversold) {
                    confidenceScore = 50;
-                   reason = `GOLD DAILY: Bearish trend but RSI ${rsi.toFixed(0)} is OVERSOLD (<30). Commercial hedging expected here. Risk of bounce to supply zone.`;
+                   reason = `5-15M: Bearish cross but RSI ${rsi.toFixed(0)} OVERSOLD (<25). Risk of bounce. Skip.`;
                } else {
                    confidenceScore = 60;
-                   reason = `GOLD DAILY: Price below EMA 50. ${isAtSupplyZone ? 'At supply zone but waiting for confirmation' : 'Waiting for supply zone entry'}.`;
+                   reason = `5-15M: ${fastBearishCross ? 'EMA cross down' : 'Downtrend'} but ${!volumeSpike ? 'no volume spike' : !sufficientVolatility ? 'low volatility (ATR: ' + atrPercent.toFixed(2) + '%)' : 'RSI not in momentum zone'}. Waiting.`;
+               }
+           } 
+           // Range Scalping: Bounce from Bollinger Bands with volume
+           else if (isVolatile && (nearLowerBand || nearUpperBand)) {
+               if (nearLowerBand && rsi > 30 && rsi < 50 && volumeSpike && isGreenCandle(openPrice, currentPrice)) {
+                   decision = 'BUY';
+                   confidenceScore = 80 + (volumeSpike ? 5 : 0);
+                   reason = `5-15M RANGE SCALP: Price $${currentPrice} bouncing from Lower BB ($${bb.lower.toFixed(4)}). RSI ${rsi.toFixed(0)} recovering. ${volumeSpike ? 'HIGH VOLUME SPIKE' : 'Strong volume'}. Quick bounce scalp.`;
+               } else if (nearUpperBand && rsi < 70 && rsi > 50 && volumeSpike && !isGreenCandle(openPrice, currentPrice)) {
+                   decision = 'SELL';
+                   confidenceScore = 80 + (volumeSpike ? 5 : 0);
+                   reason = `5-15M RANGE SCALP: Price $${currentPrice} rejecting from Upper BB ($${bb.upper.toFixed(4)}). RSI ${rsi.toFixed(0)} weakening. ${volumeSpike ? 'HIGH VOLUME SPIKE' : 'Strong volume'}. Quick rejection scalp.`;
+               } else {
+                   confidenceScore = 50;
+                   reason = `5-15M: Price at BB ${nearLowerBand ? 'lower' : 'upper'} band but ${!volumeSpike ? 'no volume spike' : 'waiting for confirmation'}.`;
                }
            } else {
-               confidenceScore = 50;
-               reason = `GOLD DAILY: Price consolidating between demand ($${demandZones.length > 0 ? demandZones[demandZones.length-1].low.toFixed(4) : 'N/A'}) and supply ($${supplyZones.length > 0 ? supplyZones[supplyZones.length-1].high.toFixed(4) : 'N/A'}) zones. No clear liquidity sweep. RSI ${rsi.toFixed(0)}.`;
+               confidenceScore = 45;
+               reason = `5-15M: No clear scalping signal. ${!isVolatile ? 'Low volatility (ATR: ' + atrPercent.toFixed(2) + '%)' : 'No EMA cross'}. ${!volumeSpike ? 'No volume spike' : 'Price consolidating'}. Waiting for momentum.`;
            }
         }
 
@@ -985,8 +1002,8 @@ export default function App() {
                   riskMultiplier = 1.5;  // Wider stop for 4H (was too tight at 1.0)
                   rewardRatio = 2.0;     // Improved 1:2 (was 1:1.5)
               } else if (b.name === "Goldy Roger") {
-                  riskMultiplier = 1.5;  // For Daily Gold
-                  rewardRatio = 2.5;     // Improved 1:2.5
+                  riskMultiplier = 0.8;  // Tight stop for 5-15m scalping (quick exits)
+                  rewardRatio = 1.5;     // Quick 1:1.5 for scalping (fast profits)
               }
               
               // Recalculate stop distance with agent-specific multiplier

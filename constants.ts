@@ -249,13 +249,13 @@ export const BOT_CONFIGS: BotConfig[] = [
   {
     name: "Goldy Roger",
     model: "Gemini 3.0 Pro (Preview)",
-    strategy: "Institutional Supply/Demand",
-    risk: "Medium",
-    targetSector: "COMMODITY",
-    personality: "I am the guardian of real value. While you play with digital tokens, I accumulate the eternal metal. I trade pure price action based on institutional supply and demand zones on the Daily chart.",
-    technique: "DAILY GOLD SCALPING. I trade XAUUSD (PAXG) using 20x leverage, targeting institutional liquidity sweeps at key psychological levels (Daily Support/Resistance).",
-    desc: "The Gold Standard. Specialized in XAUUSD/PAXG Daily Trends.",
-    preferredTimeframe: "D",
-    leverage: 10  // Reduced from 20x for better risk management
+    strategy: "High-Frequency Scalping",
+    risk: "High",
+    targetSector: "ALL",
+    personality: "Speed is my weapon. I scalp the market with precision and speed, capturing quick profits on 5-15 minute timeframes. I don't hold positions long - I enter, profit, and exit. Volume spikes and momentum are my signals. Patience is for others; I trade NOW.",
+    technique: "QUICK SCALPING STRATEGY. I trade all crypto pairs on 5-15 minute timeframes using fast EMA crosses (5/13), volume spike confirmation, and tight stops. I target quick 1:1 to 1:1.5 risk/reward ratios with high leverage for maximum efficiency. Entry on momentum, exit on profit or quick reversal.",
+    desc: "The Speed Demon. High-frequency scalper for all crypto pairs on 5-15m timeframes.",
+    preferredTimeframe: "5",  // 5 minute primary, can use 15m for confirmation
+    leverage: 15  // Higher leverage for scalping (need to move fast)
   }
 ];
